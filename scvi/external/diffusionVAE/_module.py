@@ -144,7 +144,7 @@ class Encoder(nn.Module):
         return x
 
 
-class DiffusionEncoder(nn.Module):
+class DiffusionDecoder(nn.Module):
     """Decodes data from latent space of ``n_input`` dimensions into ``n_output`` dimensions.
 
     Uses the provided diffusion process as the decoder model.
@@ -378,7 +378,7 @@ class DiffusionModuleVB(BaseModuleClass):
                              \n but was set to: {}""".format(method))
         
         # generative model
-        self.diffusion_decoder = DiffusionEncoder(
+        self.diffusion_decoder = DiffusionDecoder(
             encodings = encodings,
             encoding_x = self.encoding_x,
             encoding_y = self.encoding_y,
@@ -392,7 +392,8 @@ class DiffusionModuleVB(BaseModuleClass):
         if normalized_noise_dist is None:
             self.normalized_noise_dist = torch.ones(n_input) / n_input
         else:
-            self.normalized_noise_dist = torch.tensor(normalized_noise_dist)
+            _sum_noise = torch.sum(normalized_noise_dist)
+            self.normalized_noise_dist = torch.tensor(normalized_noise_dist) / _sum_noise
         
     def _get_inference_input(self, tensors):
         """Parse the dictionary to get appropriate args"""
@@ -410,7 +411,7 @@ class DiffusionModuleVB(BaseModuleClass):
         x_ = torch.log(1 + x)
         
         if self.grid_approximation:
-            # position is not infered but all possible positions sampled with a grid
+            # position is not inferred but all possible positions sampled with a grid
             z = self.xy_grid
         else:
             # no other mode implemented
@@ -466,7 +467,7 @@ class DiffusionModuleVB(BaseModuleClass):
         # here we extract the number of UMIs per cell as a known quantity
         scale = torch.sum(x, dim=1, keepdim=True)
         
-        # and we get the noise disttributio
+        # and we get the noise distribution
         lambda_noise = self.normalized_noise_dist
         
         if self.grid_approximation:
@@ -495,7 +496,7 @@ class DiffusionModuleVB(BaseModuleClass):
         )
         
         if self.grid_approximation:
-            # n_cells, m_gridpoints, p_tags
+            # tensor of shape n_cells, m_gridpoints, p_tags
             scale = scale.unsqueeze(1)
             noise_epsilon = noise_epsilon.unsqueeze(1).unsqueeze(2)
             lambda_signal = lambda_signal.unsqueeze(0)
@@ -511,8 +512,13 @@ class DiffusionModuleVB(BaseModuleClass):
         # to renormalize the library scale here. Forcing it to sum to 1 would
         # be wrong, as the magnitude should not be constant and depend on  the
         # position and diffusion constant.
-        scale_norm = lambda_signal.sum(axis=-1, keepdims=True) * (1 - noise_epsilon) + noise_epsilon
-        lambda_scaled = lambda_combined * scale / scale_norm
+        #scale_norm = (
+        #    lambda_signal.sum(axis=-1, keepdims=True) * (1 - noise_epsilon) 
+        #    + noise_epsilon
+        #)
+        
+        lambda_scaled = lambda_combined / lambda_combined.sum(axis=-1, keepdims=True) * scale
+        #lambda_scaled = lambda_combined * scale / scale_norm
         
         # Here, we use a Poisson measurement model
         expected_counts_dist = torch.distributions.Poisson(lambda_scaled)
@@ -522,7 +528,7 @@ class DiffusionModuleVB(BaseModuleClass):
             lambda_signal=lambda_signal,
             lambda_noise=lambda_noise,
             lambda_combined=lambda_combined,
-            scale_norm=scale_norm,
+        #    scale_norm=scale_norm,
             lambda_scaled=lambda_scaled,
             expected_counts_dist=expected_counts_dist,
             expected_counts=expected_counts,

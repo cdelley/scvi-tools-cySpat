@@ -392,7 +392,7 @@ class DiffusionModuleVB(BaseModuleClass):
         if normalized_noise_dist is None:
             self.normalized_noise_dist = torch.ones(n_input) / n_input
         else:
-            _sum_noise = torch.sum(normalized_noise_dist)
+            _sum_noise = torch.tensor(normalized_noise_dist).sum()
             self.normalized_noise_dist = torch.tensor(normalized_noise_dist) / _sum_noise
         
     def _get_inference_input(self, tensors):
@@ -647,6 +647,8 @@ class DiffusionModuleVB(BaseModuleClass):
         ax[1].set_title('noise prior ({})'.format(self.prior_noise))
         if show:
             plt.show()
+        else:
+            return ax
             
     def make_grid(self, grid_oversampling: float, encoding_x: Iterable, encoding_y: Iterable):
         """

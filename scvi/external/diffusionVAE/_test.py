@@ -1,4 +1,4 @@
-from typing import Iterable, Union
+from typing import Iterable, Union, Optional, Literal
 
 import anndata as ad
 import numpy as np
@@ -7,9 +7,9 @@ import itertools
 
 import torch
 
-from ._module import DiffusionEncoder
+from ._module import DiffusionDecoder, DiffusionModuleVB
 
-class make_test_data(DiffusionEncoder):
+class make_test_data(DiffusionDecoder):
     """
     A class to generate dummy data for the diffusionVAE model.
 
@@ -39,6 +39,7 @@ class make_test_data(DiffusionEncoder):
         diffusion_model_kwargs: dict = {},
         downsample: int = 0,
         lambda_noise: Union[float, Iterable[float]] = 0,
+        approach: Optional[Literal["abs", "rel"]] = "abs",
         **kwargs,
     ):
         
@@ -46,7 +47,7 @@ class make_test_data(DiffusionEncoder):
         
         # generate the target shape
         self.generate_data()
-        z = torch.stack([torch.tensor(self.x_img),torch.tensor(self.y_img)]).T
+        z = torch.tensor(np.array([self.y_img, self.y_img]).T)
         if downsample:
             z = z[:downsample]
             self.x_img = self.x_img[:downsample]
@@ -55,19 +56,49 @@ class make_test_data(DiffusionEncoder):
         self.make_array()
         
         # generate tag counts
-        super().__init__(
-            self.encodings,
-            torch.tensor(self.x_enc),
-            torch.tensor(self.y_enc),
-        )
-        self.lambda_signal = self.forward(
-            z = z, 
-            diffusion_constant = diffusion_constant, 
-        ) * scale
-        
-        # sample from Poisson
-        self.count_data = torch.distributions.Poisson(self.lambda_signal + lambda_noise).sample()
-        
+        if approach == "abs":
+            super().__init__(
+                self.encodings,
+                torch.tensor(self.x_enc),
+                torch.tensor(self.y_enc),
+            )
+            self.lambda_signal = self.forward(
+                z = z, 
+                diffusion_constant = diffusion_constant, 
+            ) * scale
+            
+            # sample from Poisson
+            self.count_data = torch.distributions.Poisson(
+                self.lambda_signal + lambda_noise 
+            ).sample()
+            self.combined_rate = self.lambda_signal + lambda_noise
+        elif approach == "rel":
+            if lambda_noise > 1:
+                print("for approach 'rel' lambda>_noise must be [0,1]")
+                raise ValueError
+            module = DiffusionModuleVB(
+                n_input=self.n_labels,
+                encodings=self.encodings,
+                encoding_x=self.x_enc,
+                encoding_y=self.y_enc,
+                method="MLE",
+                grid_approximation=False,
+            )
+            out_dic = module.generative(
+                z=z, 
+                diff_const=diffusion_constant, 
+                noise_epsilon=lambda_noise, 
+                scale=scale, 
+                lambda_noise=torch.ones(self.n_labels)/self.n_labels, 
+                precomputed_distances=None,
+            )
+            self.lambda_signal = out_dic['lambda_signal']*scale
+            self.count_data = out_dic['expected_counts']
+            self.combined_rate = out_dic['lambda_scaled']
+        else:
+            print("approach must be 'abs' or'rel' but was '{}'".format(approach))
+            raise ValueError
+            
         adata = ad.AnnData(X = np.array(self.count_data))
         adata.layers['rate_signal'] = np.array(self.lambda_signal)
         adata.obs['batch'] = np.ones(len(adata))
@@ -181,16 +212,13 @@ class make_test_data(DiffusionEncoder):
 
         # to truncate encodings to the actually used ones
         self.encodings = encodings[:len(self.x_enc)]
+        self.n_labels = n_labels
+        self.n_spots = len(self.encodings)
         
     def plot_test_data(self) -> None:
         """
         Plots the generated test data for visualization.
         """
-        
-        lambda_signal = self.lambda_signal
-        lambda_noise = self.lambda_noise
-        signal_rate_tot = lambda_noise + lambda_signal
-        
         fig = plt.figure(figsize=(24,6))
         ax = fig.add_subplot(1,3,1)
         ax.set_aspect('equal')
@@ -202,26 +230,22 @@ class make_test_data(DiffusionEncoder):
         plt.colorbar(cbar)
         
         ax2 = fig.add_subplot(2,3,2)
-        ax2.imshow(np.array(signal_rate_tot[:32,:]))
+        ax2.imshow(np.array(self.combined_rate[:32,:]))
         ax2.set_title('tag rate')
         
         ax3 = fig.add_subplot(2,3,5)
         ax3.imshow(np.array(self.count_data[:32,:]))
         ax3.set_title('tag count')
         
+        _srt_idx = np.argsort(torch.sum(self.combined_rate, axis=1).numpy())[::-1]
         ax4 = fig.add_subplot(2,6,11)
-        ax4.plot(
-            np.sort(
-                torch.sum(
-                    signal_rate_tot, 
-                    axis=1
-                )
-            )[::-1]
-        )
+        ax4.plot(torch.sum(self.combined_rate, axis=1).numpy()[_srt_idx], label="signal+noise")
+        ax4.plot(torch.sum(self.lambda_signal, axis=1).numpy()[_srt_idx], label="signal")
         #ax4.set_xscale('log')
         #ax4.set_yscale('log')
         ax4.set_xlabel('cell rank')
         ax4.set_ylabel('total tag rate')
+        ax4.legend()
         plt.show()
         
         

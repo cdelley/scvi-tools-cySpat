@@ -13,7 +13,7 @@ from typing import (
 
 import torch
 from torch import nn
-from torch.distributions import Normal, Gamma, Beta, kl_divergence
+from torch.distributions import Normal, Gamma, Beta, LogNormal, kl_divergence
 import numpy as np
 
 
@@ -359,16 +359,15 @@ class DiffusionModuleVB(BaseModuleClass):
             # encoder for amortized variational Bayes of global latent variable
             # Using NN and averaging converges faster than single param for globals
             # (this could probably be solved by setting different learning rates)
-            self.diff_encoder = nn.Linear(layer_dims[-1], 2)
+        #    self.diff_encoder = nn.Linear(layer_dims[-1], 2)
+            self.diff_params = nn.Parameter(torch.rand(2), requires_grad=True)
             
             # encoder for amortized variational Bayes of local latent variables
             self.noise_encoder = nn.Linear(layer_dims[-1], 2)
             
         elif method == "MLE":
             # global diffusion constant
-            self.diff_const = nn.Parameter(
-                torch.exp(torch.tensor(0., requires_grad=True))
-            )
+            self.diff_const = nn.Parameter(torch.rand(1), requires_grad=True)
                         
             # encoder for local latent variables
             self.noise_encoder = nn.Linear(layer_dims[-1], 1)
@@ -423,9 +422,12 @@ class DiffusionModuleVB(BaseModuleClass):
         
         if self.method == "VB":
             # encoder approach for diffusion
-            diff_params = self.diff_encoder(aux_latents)
-            diff_params = self.exp_transform(diff_params).mean(dim=0) + self.dist_eps
-            diff_dist = Gamma(diff_params[0], diff_params[1])
+         #   diff_params = self.diff_encoder(aux_latents)
+         #   diff_params = self.exp_transform(diff_params).mean(dim=0) + self.dist_eps
+            diff_const_conc = self.diff_params[0]
+            diff_const_rate = self.exp_transform(self.diff_params[1]) + self.dist_eps
+            diff_params = torch.tensor([diff_const_conc, diff_const_rate])
+            diff_dist = LogNormal(diff_const_conc, diff_const_rate)
             diff_const = diff_dist.rsample()
 
             
@@ -446,7 +448,7 @@ class DiffusionModuleVB(BaseModuleClass):
         elif self.method == "MLE":
             # global
             #diff_const = diff_params[0]
-            diff_const = self.diff_const
+            diff_const = self.exp_transform(self.diff_const)
             noise_epsilon = self.sigmoid_transform(noise_params.ravel())
             
             out_dict = dict(

@@ -356,10 +356,6 @@ class DiffusionModuleVB(BaseModuleClass):
         self.loss_agregation = torch.mean if loss_agregation is None else loss_agregation
         
         if method == "VB":            
-            # encoder for amortized variational Bayes of global latent variable
-            # Using NN and averaging converges faster than single param for globals
-            # (this could probably be solved by setting different learning rates)
-        #    self.diff_encoder = nn.Linear(layer_dims[-1], 2)
             self.diff_params = nn.Parameter(torch.rand(2), requires_grad=True)
             
             # encoder for amortized variational Bayes of local latent variables
@@ -396,7 +392,7 @@ class DiffusionModuleVB(BaseModuleClass):
         
     def _get_inference_input(self, tensors):
         """Parse the dictionary to get appropriate args"""
-        # let us fetch the raw counts, and add them to the dictionary
+        # fetch the raw counts, and add them to the dictionary
         x = tensors[REGISTRY_KEYS.X_KEY]
 
         input_dict = dict(x=x)
@@ -421,9 +417,6 @@ class DiffusionModuleVB(BaseModuleClass):
         noise_params = self.noise_encoder(aux_latents)
         
         if self.method == "VB":
-            # encoder approach for diffusion
-         #   diff_params = self.diff_encoder(aux_latents)
-         #   diff_params = self.exp_transform(diff_params).mean(dim=0) + self.dist_eps
             diff_const_conc = self.diff_params[0]
             diff_const_rate = self.exp_transform(self.diff_params[1]) + self.dist_eps
             diff_params = torch.tensor([diff_const_conc, diff_const_rate])
@@ -609,13 +602,13 @@ class DiffusionModuleVB(BaseModuleClass):
     
     def position_and_variance(self, logpostprob, xy_coords):
         """Since we are assuming an uniform prior distribution over all grid position,
-        this returns the MAP cell postion estimate for grid approach"""
+        this returns the MAP cell position estimate for grid approach"""
         postprob = torch.exp(logpostprob)
         exp_pos_x = torch.sum(xy_coords[:,0]*postprob, axis=-1, keepdims=True)
         exp_pos_y = torch.sum(xy_coords[:,1]*postprob, axis=-1, keepdims=True)
 
         exp_var_x = torch.sum(((xy_coords[:,0] - exp_pos_x) ** 2) * postprob, axis=-1)
-        exp_var_y = torch.sum(((xy_coords[:,1] - exp_pos_x) ** 2) * postprob, axis=-1)
+        exp_var_y = torch.sum(((xy_coords[:,1] - exp_pos_y) ** 2) * postprob, axis=-1)
 
         exp_err = torch.sqrt(exp_var_x+exp_var_y)
         return exp_pos_x.ravel(), exp_pos_y.ravel(), exp_err
@@ -682,7 +675,7 @@ class DiffusionModuleVB(BaseModuleClass):
                 int(y_spots * grid_oversampling), 
                 dtype=torch.float
             ),
-            indexing='ij'
+            indexing='xy'
         )
         self.x_test = torch.ravel(x_test)
         self.y_test = torch.ravel(y_test)

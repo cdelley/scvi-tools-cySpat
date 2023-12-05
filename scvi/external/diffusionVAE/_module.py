@@ -417,13 +417,14 @@ class DiffusionModuleVB(BaseModuleClass):
         noise_params = self.noise_encoder(aux_latents)
         
         if self.method == "VB":
+            # global params
             diff_const_conc = self.diff_params[0]
             diff_const_rate = self.exp_transform(self.diff_params[1]) + self.dist_eps
             diff_params = torch.tensor([diff_const_conc, diff_const_rate])
             diff_dist = LogNormal(diff_const_conc, diff_const_rate)
             diff_const = diff_dist.rsample()
 
-            
+            # local params
             noise_params = self.exp_transform(noise_params) + self.dist_eps
             noise_epsilon_dist = Beta(noise_params[:,0], noise_params[:,1])
             noise_epsilon = noise_epsilon_dist.rsample()
@@ -439,9 +440,10 @@ class DiffusionModuleVB(BaseModuleClass):
             )
             
         elif self.method == "MLE":
-            # global
-            #diff_const = diff_params[0]
-            diff_const = self.exp_transform(self.diff_const)
+            # global params
+            diff_const = self.exp_transform(self.diff_const)[0]
+            
+            # local params
             noise_epsilon = self.sigmoid_transform(noise_params.ravel())
             
             out_dict = dict(
@@ -583,7 +585,8 @@ class DiffusionModuleVB(BaseModuleClass):
                 reconstruction_loss=E_loglik_post_per_cell, 
                 extra_metrics = {
                     'diff_const':diff_const,
-                    'noise_epsilon':noise_epsilon.mean()},
+                    'noise_epsilon':noise_epsilon.mean()
+                },
             )
         
         return loss_out

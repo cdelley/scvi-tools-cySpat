@@ -1,4 +1,4 @@
-from typing import Iterable, Union, Optional, Literal
+from typing import Iterable, Union, Optional, Literal, Dict
 
 import anndata as ad
 import numpy as np
@@ -26,10 +26,25 @@ class make_test_data(DiffusionDecoder):
         Additional keyword arguments for the diffusion model.
     downsample : int, default=0
         Number of data points to downsample to. If 0, no downsampling is performed.
+    encoding_dict : Dict = None:
+        Dictionary output from utils.encoding_converters() or None. If None 
+        random pattern will be generated.
     lambda_noise : Union[float, Iterable[float]], default=0
         Noise level or an array of noise levels for the count data.
+    approach : Literal["abs", "rel"] = "abs"
+        if 'abs' lambda_noise is treated as average background rate. If 'rel'
+        lambda_noise is the ratio of the background contribution ti the total 
+        counts and must be in the range [0,1]
+    n_labels : int, default=96
+        Number of different labels/tags.
+    max_n_spots : int, default=48
+        Square root of the number of spots in the array.
+    hexagonal : bool, default=False
+        If True, spots are arranged in a hexagonal grid.
+    seed : int, default=7
+        Seed for the random number generator.
     **kwargs
-        Additional keyword arguments.
+        Additional keyword arguments passed to self.generate_data function
     """
     
     def __init__(
@@ -38,22 +53,42 @@ class make_test_data(DiffusionDecoder):
         scale: float,
         diffusion_model_kwargs: dict = {},
         downsample: int = 0,
+        encoding_dict: Dict = None,
         lambda_noise: Union[float, Iterable[float]] = 0,
-        approach: Optional[Literal["abs", "rel"]] = "abs",
+        approach: Literal["abs", "rel"] = "abs",
+        n_labels: int = 96,
+        max_n_spots: int = 48,
+        hexagonal: bool = False,
+        seed: int = 7,
         **kwargs,
     ):
         
         self.lambda_noise = lambda_noise
         
         # generate the target shape
-        self.generate_data()
-        z = torch.tensor(np.array([self.y_img, self.y_img]).T)
+        self.generate_data(**kwargs)
+        z = torch.tensor(np.array([self.x_img, self.y_img]).T)
         if downsample:
             z = z[:downsample]
             self.x_img = self.x_img[:downsample]
             self.y_img = self.y_img[:downsample]
+        
+        
         # generate a dummy encoding
-        self.make_array()
+        if encoding_dict == None:
+            self.make_array(
+                n_labels,
+                max_n_spots,
+                hexagonal,
+                seed,
+            )
+        else:
+            self.x_enc = encoding_dict['encoding_x_position']
+            self.y_enc =  encoding_dict['encoding_y_position']
+            self.encodings = encoding_dict['numerical_encoding']
+            self.n_labels = len(set([i for tup in self.encodings for i in tup]))
+            self.n_spots = len(self.encodings)
+            
         
         # generate tag counts
         if approach == "abs":
@@ -66,12 +101,11 @@ class make_test_data(DiffusionDecoder):
                 z = z, 
                 diffusion_constant = diffusion_constant, 
             ) * scale
+            self.combined_rate = self.lambda_signal + lambda_noise
             
             # sample from Poisson
-            self.count_data = torch.distributions.Poisson(
-                self.lambda_signal + lambda_noise 
-            ).sample()
-            self.combined_rate = self.lambda_signal + lambda_noise
+            self.count_data = torch.distributions.Poisson(self.combined_rate).sample()
+            
         elif approach == "rel":
             if lambda_noise > 1:
                 print("for approach 'rel' lambda>_noise must be [0,1]")
@@ -211,9 +245,14 @@ class make_test_data(DiffusionDecoder):
             self.y_enc[::2] += 1
 
         # to truncate encodings to the actually used ones
-        self.encodings = encodings[:len(self.x_enc)]
-        self.n_labels = n_labels
-        self.n_spots = len(self.encodings)
+        encodings_trunc = encodings[:len(self.x_enc)]
+        n_labels2 = len(set([i for tup in encodings_trunc for i in tup]))
+        if n_labels2 != n_labels:
+            self.make_array(n_labels2, max_n_spots, hexagonal, seed)
+        else:
+            self.encodings = encodings_trunc
+            self.n_labels = n_labels
+            self.n_spots = len(self.encodings)
         
     def plot_test_data(self) -> None:
         """
@@ -241,8 +280,6 @@ class make_test_data(DiffusionDecoder):
         ax4 = fig.add_subplot(2,6,11)
         ax4.plot(torch.sum(self.combined_rate, axis=1).numpy()[_srt_idx], label="signal+noise")
         ax4.plot(torch.sum(self.lambda_signal, axis=1).numpy()[_srt_idx], label="signal")
-        #ax4.set_xscale('log')
-        #ax4.set_yscale('log')
         ax4.set_xlabel('cell rank')
         ax4.set_ylabel('total tag rate')
         ax4.legend()

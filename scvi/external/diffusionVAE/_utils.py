@@ -17,7 +17,8 @@ class encoding_converters():
     
     @staticmethod
     def from_scienion_print_file(
-        path: str
+        path: str,
+        scale: int = 1,
     ) -> Dict:
         """
         Reads a Scienion print file (CSV/TSV) and extracts spatial encoding.
@@ -70,8 +71,8 @@ class encoding_converters():
         
         out_dict = {
             "numerical_encoding": encodings,
-            "encoding_x_position": encoding_x,
-            "encoding_y_position": encoding_y,
+            "encoding_x_position": encoding_x * scale,
+            "encoding_y_position": encoding_y * scale,
             "encodings_str": encodings_str,
             "str_to_num_convert": label_convert,
         }

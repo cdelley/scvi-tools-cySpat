@@ -153,7 +153,8 @@ class DiffusionVI(VAEMixin, UnsupervisedTrainingMixin, BaseModelClass):
         return_dist: bool = False,
         set_diff_const: Optional[float] = None,
         set_noise_epsilon: Optional[float] = None,
-    ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+        logpostprob_output: bool = False,
+    ) -> Dict:
         """
         Computes the latent representation of cells.
 
@@ -175,11 +176,19 @@ class DiffusionVI(VAEMixin, UnsupervisedTrainingMixin, BaseModelClass):
             Sets a specific diffusion constant.
         set_noise_epsilon : Optional[float]
             Sets a specific noise epsilon.
-
+        logpostprob_output: bool = False
+            if the logpostprob distribution over the array should be returned for each cell. Defaults to False 
+            as this array is n-grid-points * n-cells and can get large. 
+            
         Returns
         -------
-        Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]
-            The latent representation of each cell, or a tuple of its mean and variance.
+        'latents' Dict containing the posterior parameters:
+            latents['diffusion_constant']   The global diffusion constant estimate
+            latents['noise_epsilon']        The cell wise noise epsilon estimate
+            latents['xy_map']               The xy MAP position estimate
+            latents['xy_err']               The xy uncertainty in the estimate
+            latents['xy_mle']               The xy MLE position estimate
+            Optionl: latents['logpostprob'] The log posterior probability distribution for each cell across all xy
         """
         
         self._check_if_trained(warn=True)
@@ -191,11 +200,13 @@ class DiffusionVI(VAEMixin, UnsupervisedTrainingMixin, BaseModelClass):
         
         latents = {
             'diffusion_constant': [],
-            'noise_epsilon' : [],
-            'xy_map' : [],
-            'xy_err' : [],
-            'xy_mle' : [],
-            'logpostprob' : [],
+            'noise_epsilon': [],
+            'xy_map': [],
+            'xy_err': [],
+            'xy_mle': [],
+            'diffusion_dist_params': [],
+            'noise_dist_params': [],
+            'logpostprob': [],
         }
         for tensors in dataloader:
             inference_inputs = self.module._get_inference_input(tensors)
@@ -214,10 +225,8 @@ class DiffusionVI(VAEMixin, UnsupervisedTrainingMixin, BaseModelClass):
                 mean_noise_epsilon = noise_epsilon.mean(dim=0)
                     
             elif self.method == "MLE":
-                diff_const = inference_outputs["diff_const"]
-                mean_diff_const = diff_const
-                noise_epsilon = inference_outputs["noise_epsilon"]
-                mean_noise_epsilon = noise_epsilon
+                mean_diff_const = inference_outputs["diff_const"]
+                mean_noise_epsilon = inference_outputs["noise_epsilon"]
             
             if set_diff_const is not None:
                 mean_diff_const = mean_diff_const * 0 + set_diff_const
@@ -225,7 +234,7 @@ class DiffusionVI(VAEMixin, UnsupervisedTrainingMixin, BaseModelClass):
                 mean_noise_epsilon = mean_noise_epsilon * 0 + set_noise_epsilon
                 
             # currently we always use the mean of the latent parameters and 
-            # not fully propagate their uncertainity into cell position inference
+            # not fully propagate their uncertainty into cell position inference
             observed_counts = tensors[REGISTRY_KEYS.X_KEY]
             generative_outputs = self.module.generative(
                 xy, 
@@ -238,30 +247,41 @@ class DiffusionVI(VAEMixin, UnsupervisedTrainingMixin, BaseModelClass):
             expected_counts = generative_outputs["expected_counts"]
             expected_counts_dist = generative_outputs["expected_counts_dist"]
 
-            # calculate log likelyhood of the tag counts to get the positions
+            # calculate log likelihood of the tag counts to get the positions
             observed_counts = observed_counts.to(expected_counts.device)
             xy =  xy.to(expected_counts.device)
             llik, logpostprob = self.module.post_prob(observed_counts, expected_counts_dist)
             x_map, y_map, xy_err = self.module.position_and_variance(logpostprob, xy)
             x_mle, y_mle = self.module.MLE_position_estimate(logpostprob, xy)
             
-            if give_mean:
-                diff_const = mean_diff_const
-                noise_epsilon = mean_noise_epsilon
-            
-            latents['diffusion_constant'].append(diff_const.cpu().numpy())
-            latents['noise_epsilon'].append(noise_epsilon.cpu().numpy())
+            if not give_mean and self.method == "VB":
+                out_diff_const = diff_const
+                out_noise_epsilon = noise_epsilon
+            else:
+                out_diff_const = mean_diff_const
+                out_noise_epsilon = mean_noise_epsilon
+                
+            latents['diffusion_constant'].append(out_diff_const.cpu().numpy())
+            latents['noise_epsilon'].append(out_noise_epsilon.cpu().numpy())
             latents['xy_map'].append(torch.stack([x_map, y_map]).cpu().numpy())
             latents['xy_err'].append(xy_err.cpu().numpy())
             latents['xy_mle'].append(torch.stack([x_mle, y_mle]).cpu().numpy())
-            #latents['logpostprob'].append(logpostprob.cpu().numpy())
-            
-        latents['diffusion_constant'] = np.array(latents['diffusion_constant']).mean(axis=-1)
+            if logpostprob_output:
+                latents['logpostprob'].append(logpostprob.cpu().numpy())
+            if self.method == "VB":
+                latents['diffusion_dist_params'].append(inference_outputs["diff_params"].cpu().numpy())
+                latents['noise_dist_params'].append(inference_outputs["noise_params"].cpu().numpy())
+        
+        latents['diffusion_constant'] = np.array(latents['diffusion_constant']).mean(axis=0)
         latents['noise_epsilon'] = np.concatenate(latents['noise_epsilon'], axis=-1)
         latents['xy_map'] = np.concatenate(latents['xy_map'], axis=-1).T
         latents['xy_err'] = np.concatenate(latents['xy_err'], axis=-1)
         latents['xy_mle'] = np.concatenate(latents['xy_mle'], axis=-1).T
-        #latents['logpostprob'] = np.concatenate(latents['logpostprob'], axis=0)
+        if logpostprob_output:
+            latents['logpostprob'] = np.concatenate(latents['logpostprob'], axis=0)
+        if self.method == "VB":
+            latents['diffusion_dist_params'] = np.array(latents['diffusion_dist_params']).mean(axis=0)
+            latents['noise_dist_params'] = np.concatenate(latents['noise_dist_params'], axis=0)
         return latents
     
 

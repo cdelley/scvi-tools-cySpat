@@ -545,7 +545,7 @@ class DiffusionModuleVB(BaseModuleClass):
         diff_const = inference_outputs["diff_const"]
         noise_epsilon = inference_outputs["noise_epsilon"].cpu()
         
-        # calculate log likelyhood of the tag counts
+        # calculate log likelihood of the tag counts
         llik, logpostprob = self.post_prob(observed_counts, expected_counts_dist)
         E_loglik_post_per_cell = self.E_loglik_post(llik, logpostprob)
         E_loglik_post = self.loss_agregation(E_loglik_post_per_cell)
@@ -566,12 +566,14 @@ class DiffusionModuleVB(BaseModuleClass):
                     kl_local=kl_divergence_noise, 
                     kl_global=kl_divergence_complete,
                     extra_metrics = {
-                    'noise_epsilon':noise_epsilon.mean(),
-                    'noise_params0':inference_outputs["noise_params"].mean(axis=0)[0],
-                    'noise_params1':inference_outputs["noise_params"].mean(axis=0)[1],
-                    'diff_const':diff_const,
-                    'diff_params0':inference_outputs["diff_params"][0],
-                    'diff_params1':inference_outputs["diff_params"][1]},
+                    'noise_epsilon': noise_epsilon.mean(),
+                    'noise_epsilon_95': torch.quantile(noise_epsilon, 0.95),
+                    'noise_epsilon_05': torch.quantile(noise_epsilon, 0.05),
+                    'noise_params0': inference_outputs["noise_params"].mean(axis=0)[0],
+                    'noise_params1': inference_outputs["noise_params"].mean(axis=0)[1],
+                    'diff_const': diff_const,
+                    'diff_params0': inference_outputs["diff_params"][0],
+                    'diff_params1': inference_outputs["diff_params"][1]},
             )
             
         elif self.method == "MLE":
@@ -584,8 +586,10 @@ class DiffusionModuleVB(BaseModuleClass):
                 loss=loss, 
                 reconstruction_loss=E_loglik_post_per_cell, 
                 extra_metrics = {
-                    'diff_const':diff_const,
-                    'noise_epsilon':noise_epsilon.mean()
+                    'diff_const': diff_const,
+                    'noise_epsilon': noise_epsilon.mean(),
+                    'noise_epsilon_95': torch.quantile(noise_epsilon, 0.95),
+                    'noise_epsilon_05': torch.quantile(noise_epsilon, 0.05),
                 },
             )
         

@@ -8,6 +8,7 @@ from .solo import SOLO
 from .stereoscope import RNAStereoscope, SpatialStereoscope
 from .tangram import Tangram
 from .diffusionVAE import DiffusionVI
+from .hdabseq import ABseqVI
 
 __all__ = [
     "SCAR",
@@ -21,4 +22,5 @@ __all__ = [
     "POISSONVI",
     "ContrastiveVI",
     "DiffusionVI",
+    "ABseqVI",
 ]

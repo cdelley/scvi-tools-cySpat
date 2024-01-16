@@ -27,7 +27,11 @@ class encoding_converters():
         Scienion print files' specific formats.
 
         Args:
-            path (str): File path to the Scienion print file, CSV or TSV.
+            path (str):
+                File path to the Scienion print file, CSV or TSV.
+            scale (int):
+                distance between adjacent spatial grid points in the same units as
+                diffusion constant. For the default diffusion prior this should be around 1
 
         Returns:
             Dict: A dictionary with spatial encoding data, including:

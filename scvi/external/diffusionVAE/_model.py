@@ -66,6 +66,8 @@ class DiffusionVI(VAEMixin, UnsupervisedTrainingMixin, BaseModelClass):
         spot_ypos: Iterable,
         layer_dims: List[int] = [96,10],
         grid_oversampling: float = 1.0,
+        grid_x_offset: float = 0.0,
+        grid_y_offset: float = 0.0,
         method: Optional[Literal["VB", "MLE"]] = "MLE",
          **module_kwargs,
     ):
@@ -87,6 +89,8 @@ class DiffusionVI(VAEMixin, UnsupervisedTrainingMixin, BaseModelClass):
             encoding_y = spot_ypos,
             grid_approximation = True,
             grid_oversampling = grid_oversampling,
+            grid_x_offset = grid_x_offset,
+            grid_y_offset = grid_y_offset,
             normalized_noise_dist = noise_dist,
             method = method,
             **module_kwargs,

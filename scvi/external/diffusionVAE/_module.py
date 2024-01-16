@@ -313,7 +313,9 @@ class DiffusionModuleVB(BaseModuleClass):
         n_cat_list: Iterable[int] = None,
         layer_dims: List[int] = [64, 12],
         grid_approximation: bool = True,
-        grid_oversampling: int = 1,
+        grid_oversampling: float = 1.0,
+        grid_x_offset: float = 0.0,
+        grid_y_offset: float = 0.0,
         normalized_noise_dist: Iterable[float] = None,
         method: Optional[Literal["VB", "MLE"]] = "MLE",
         dist_eps: float = 1e-8,
@@ -324,7 +326,6 @@ class DiffusionModuleVB(BaseModuleClass):
         super().__init__()
         
         # params
-#        self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.grid_approximation = grid_approximation
         self.method = method
         self.dist_eps = dist_eps
@@ -380,7 +381,13 @@ class DiffusionModuleVB(BaseModuleClass):
         )
         
         if grid_approximation:
-            self.xy_grid = self.make_grid(grid_oversampling, self.encoding_x, self.encoding_y)
+            self.xy_grid = self.make_grid(
+                grid_oversampling, 
+                self.encoding_x, 
+                self.encoding_y, 
+                grid_x_offset,
+                grid_y_offset,
+            )
             self.precomputed_distances = self.diffusion_decoder.rel_distances(self.xy_grid)
         
         # noise model
@@ -652,7 +659,14 @@ class DiffusionModuleVB(BaseModuleClass):
         else:
             return ax
             
-    def make_grid(self, grid_oversampling: float, encoding_x: Iterable, encoding_y: Iterable):
+    def make_grid(
+        self, 
+        grid_oversampling: float, 
+        encoding_x: Iterable, 
+        encoding_y: Iterable,
+        grid_x_offset: float,
+        grid_y_offset: float,
+    ):
         """
         set up a sampling grid accross the domain of x and y.
         
@@ -684,8 +698,8 @@ class DiffusionModuleVB(BaseModuleClass):
             ),
             indexing='xy'
         )
-        self.x_test = torch.ravel(x_test)
-        self.y_test = torch.ravel(y_test)
+        self.x_test = torch.ravel(x_test) + grid_x_offset
+        self.y_test = torch.ravel(y_test) + grid_y_offset
         xy = torch.stack([self.x_test,self.y_test]).T
         return xy
 
